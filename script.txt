@@ -1,0 +1,750 @@
+# claims_qa/pipeline.py
+from claims_qa.line_of_business.base import BaseTrigger
+from claims_qa.utils import common_functions
+
+class TriggerPipeline(BaseTrigger):
+    def __init__(self, query, claim_id, line_of_business):
+        self.query = query
+        self.claim_id = claim_id
+        self.line_of_business = line_of_business
+        
+        if self.line_of_business == 'Medicaid':
+            self.query_classification = MedicaidTrigger.query_classification
+            self.get_data_sources = MedicaidTrigger.get_data_sources
+            self.get_data = MedicaidTrigger.get_data
+            self.present_data = MedicaidTrigger.present_data
+            self.get_pre_defined_answer = MedicaidTrigger.get_pre_defined_answer
+            self.get_llm_answer = MedicaidTrigger.get_llm_answer
+        elif self.line_of_business == 'Medicare':
+            self.query_classification = MedicareTrigger.query_classification
+            self.get_data_sources = MedicareTrigger.get_data_sources
+            self.get_data = MedicareTrigger.get_data
+            self.present_data = MedicareTrigger.present_data
+            self.get_pre_defined_answer = MedicareTrigger.get_pre_defined_answer
+            self.get_llm_answer = MedicareTrigger.get_llm_answer
+        elif self.line_of_business == 'Commercial':
+            self.query_classification = CommercialTrigger.query_classification
+            self.get_data_sources = CommercialTrigger.get_data_sources
+            self.get_data = CommercialTrigger.get_data
+            self.present_data = CommercialTrigger.present_data
+            self.get_pre_defined_answer = CommercialTrigger.get_pre_defined_answer
+            self.get_llm_answer = CommercialTrigger.get_llm_answer
+        else:
+            raise ValueError('Invalid line of business')
+    
+    def pipeline(self):
+        query_category = self.query_classification()
+        data_sources = self.get_data_sources()
+        data = self.get_data(data_sources)
+        presented_data = self.present_data(data)
+        
+        if query_category == 'pre-defined':
+            answer = self.get_pre_defined_answer(presented_data)
+        else:
+            answer = self.get_llm_answer(presented_data)
+        
+        return answer
+
+# claims_qa/line_of_business/base.py
+class BaseTrigger:
+    def query_classification(self):
+        # Implement query classification logic
+        pass
+
+    def get_data_sources(self):
+        # Implement data source selection logic
+        pass
+
+    def get_data(self, data_sources):
+        # Implement data fetching logic
+        pass
+
+    def present_data(self, data):
+        # Implement data presentation logic
+        pass
+
+    def get_pre_defined_answer(self, presented_data):
+        # Implement pre-defined answer logic
+        pass
+
+    def get_llm_answer(self, presented_data):
+        # Implement LLM answer logic
+        pass
+
+# claims_qa/line_of_business/medicaid.py
+from base import BaseTrigger
+
+class MedicaidTrigger(BaseTrigger):
+    def query_classification(self):
+        # Implement Medicaid-specific query classification logic
+        pass
+
+    def get_data_sources(self):
+        return [a_faxy, b_bddi]
+
+    def get_data(self, data_sources):
+        data = []
+        for source in data_sources:
+            data.extend(source.get_data(self.claim_id))
+        return data
+
+    def present_data(self, data):
+        return data_presentation.present_medicaid_data(data)
+
+    def get_pre_defined_answer(self, presented_data):
+        return business_logic.get_medicaid_pre_defined_answer(presented_data)
+
+    def get_llm_answer(self, presented_data):
+        return business_logic.get_medicaid_llm_answer(presented_data)
+
+# claims_qa/line_of_business/medicare.py
+from base import BaseTrigger
+
+class MedicareTrigger(BaseTrigger):
+    def query_classification(self):
+        # Implement Medicare-specific query classification logic
+        pass
+
+    def get_data_sources(self):
+        return [c.snowflake_db]
+
+    def get_data(self, data_sources):
+        data = []
+        for source in data_sources:
+            data.extend(source.get_data(self.claim_id))
+        return data
+
+    def present_data(self, data):
+        return data_presentation.present_medicare_data(data)
+
+    def get_pre_defined_answer(self, presented_data):
+        return business_logic.get_medicare_pre_defined_answer(presented_data)
+
+    def get_llm_answer(self, presented_data):
+        return business_logic.get_medicare_llm_answer(presented_data)
+
+# claims_qa/line_of_business/commercial.py
+from base import BaseTrigger
+
+class CommercialTrigger(BaseTrigger):
+    def query_classification(self):
+        # Implement Commercial-specific query classification logic
+        pass
+
+    def get_data_sources(self):
+        return [d.api]
+
+    def get_data(self, data_sources):
+        data = []
+        for source in data_sources:
+            data.extend(source.get_data(self.claim_id))
+        return data
+
+    def present_data(self, data):
+        return data_presentation.present_commercial_data(data)
+
+    def get_pre_defined_answer(self, presented_data):
+        return business_logic.get_commercial_pre_defined_answer(presented_data)
+
+    def get_llm_answer(self, presented_data):
+        return business_logic.get_commercial_llm_answer(presented_data)
+
+===========================
+# claims_qa/pipeline.py
+from claims_qa.line_of_business.base import BaseTrigger
+from claims_qa.utils import common_functions
+
+class TriggerPipeline:
+    def __init__(self, query, claim_id, line_of_business):
+        self.query = query
+        self.claim_id = claim_id
+        self.line_of_business = line_of_business
+        
+        if self.line_of_business == 'Medicaid':
+            self.trigger = MedicaidTrigger(self.query, self.claim_id)
+        elif self.line_of_business == 'Medicare':
+            self.trigger = MedicareTrigger(self.query, self.claim_id)
+        elif self.line_of_business == 'Commercial':
+            self.trigger = CommercialTrigger(self.query, self.claim_id)
+        else:
+            raise ValueError('Invalid line of business')
+    
+    def pipeline(self):
+        query_category = self.trigger.query_classification()
+        data_sources = self.trigger.get_data_sources()
+        data = self.trigger.get_data(data_sources)
+        presented_data = self.trigger.present_data(data)
+        
+        if query_category == 'pre-defined':
+            answer = self.trigger.get_pre_defined_answer(presented_data)
+        else:
+            answer = self.trigger.get_llm_answer(presented_data)
+        
+        return answer
+
+# claims_qa/line_of_business/base.py
+class BaseTrigger:
+    def __init__(self, query, claim_id):
+        self.query = query
+        self.claim_id = claim_id
+    
+    def query_classification(self):
+        # Implement query classification logic
+        pass
+
+    def get_data_sources(self):
+        # Implement data source selection logic
+        pass
+
+    def get_data(self, data_sources):
+        # Implement data fetching logic
+        pass
+
+    def present_data(self, data):
+        # Implement data presentation logic
+        pass
+
+    def get_pre_defined_answer(self, presented_data):
+        # Implement pre-defined answer logic
+        pass
+
+    def get_llm_answer(self, presented_data):
+        # Implement LLM answer logic
+        pass
+
+# claims_qa/line_of_business/medicaid.py
+from base import BaseTrigger
+
+class MedicaidTrigger(BaseTrigger):
+    def query_classification(self):
+        # Implement Medicaid-specific query classification logic
+        pass
+
+    def get_data_sources(self):
+        return [a_faxy, b_bddi]
+
+    def get_data(self, data_sources):
+        data = []
+        for source in data_sources:
+            data.extend(source.get_data(self.claim_id))
+        return data
+
+    def present_data(self, data):
+        return data_presentation.present_medicaid_data(data)
+
+    def get_pre_defined_answer(self, presented_data):
+        return business_logic.get_medicaid_pre_defined_answer(presented_data)
+
+    def get_llm_answer(self, presented_data):
+        return business_logic.get_medicaid_llm_answer(presented_data)
+
+# claims_qa/line_of_business/medicare.py
+from base import BaseTrigger
+
+class MedicareTrigger(BaseTrigger):
+    def query_classification(self):
+        # Implement Medicare-specific query classification logic
+        pass
+
+    def get_data_sources(self):
+        return [c.snowflake_db]
+
+    def get_data(self, data_sources):
+        data = []
+        for source in data_sources:
+            data.extend(source.get_data(self.claim_id))
+        return data
+
+    def present_data(self, data):
+        return data_presentation.present_medicare_data(data)
+
+    def get_pre_defined_answer(self, presented_data):
+        return business_logic.get_medicare_pre_defined_answer(presented_data)
+
+    def get_llm_answer(self, presented_data):
+        return business_logic.get_medicare_llm_answer(presented_data)
+
+# claims_qa/line_of_business/commercial.py
+from base import BaseTrigger
+
+class CommercialTrigger(BaseTrigger):
+    def query_classification(self):
+        # Implement Commercial-specific query classification logic
+        pass
+
+    def get_data_sources(self):
+        return [d.api]
+
+    def get_data(self, data_sources):
+        data = []
+        for source in data_sources:
+            data.extend(source.get_data(self.claim_id))
+        return data
+
+    def present_data(self, data):
+        return data_presentation.present_commercial_data(data)
+
+    def get_pre_defined_answer(self, presented_data):
+        return business_logic.get_commercial_pre_defined_answer(presented_data)
+
+    def get_llm_answer(self, presented_data):
+        return business_logic.get_commercial_llm_answer(presented_data)
+
+===============================
+# entry_point.py
+from flask import Flask, request
+from claims_qa.pipeline import TriggerPipeline
+
+app = Flask(__name__)
+
+@app.route('/answer_query', methods=['POST'])
+def answer_query():
+    query = request.form['query']
+    claim_id = request.form['claim_id']
+    line_of_business = request.form['line_of_business']
+    
+    pipeline = TriggerPipeline(query, claim_id, line_of_business)
+    answer = pipeline.pipeline()
+    
+    return answer
+
+if __name__ == '__main__':
+    app.run()
+
+# claims_qa/pipeline.py
+from claims_qa.line_of_business.medicaid import TriggerMedicaid
+from claims_qa.line_of_business.medicare import TriggerMedicare
+from claims_qa.line_of_business.commercial import TriggerCommercial
+from claims_qa.utils import common_functions
+
+class TriggerPipeline:
+    def __init__(self, query, claim_id, line_of_business):
+        self.query = query
+        self.claim_id = claim_id
+        self.line_of_business = line_of_business
+        
+        if self.line_of_business == 'Medicaid':
+            self.trigger = TriggerMedicaid(self.query, self.claim_id)
+        elif self.line_of_business == 'Medicare':
+            self.trigger = TriggerMedicare(self.query, self.claim_id)
+        elif self.line_of_business == 'Commercial':
+            self.trigger = TriggerCommercial(self.query, self.claim_id)
+        else:
+            raise ValueError('Invalid line of business')
+    
+    def pipeline(self):
+        query_category = common_functions.query_classification(self.query)
+        data_sources = self.trigger.get_data_sources()
+        data = self.trigger.get_data(data_sources)
+        presented_data = self.trigger.present_data(data)
+        
+        if query_category == 'pre-defined':
+            answer = self.trigger.get_pre_defined_answer(presented_data)
+        else:
+            answer = self.trigger.get_llm_answer(presented_data)
+        
+        return answer
+
+# claims_qa/line_of_business/medicaid.py
+from claims_qa.data_source import a_faxy, b_bddi
+from claims_qa.data_presentation import data_presentation
+from claims_qa.business_logic import business_logic
+
+class TriggerMedicaid:
+    def __init__(self, query, claim_id):
+        self.query = query
+        self.claim_id = claim_id
+    
+    def get_data_sources(self):
+        return [a_faxy, b_bddi]
+    
+    def get_data(self, data_sources):
+        data = []
+        for source in data_sources:
+            data.extend(source.get_data(self.claim_id))
+        return data
+    
+    def present_data(self, data):
+        return data_presentation.present_medicaid_data(data)
+    
+    def get_pre_defined_answer(self, presented_data):
+        return business_logic.get_medicaid_pre_defined_answer(presented_data)
+    
+    def get_llm_answer(self, presented_data):
+        return business_logic.get_medicaid_llm_answer(presented_data)
+
+# claims_qa/utils.py
+def query_classification(query):
+    # Implement query classification logic
+    pass
+
+def common_functions():
+    # Define common functions shared across line-of-business
+    pass
+=============================
+# claims_qa/pipeline.py
+from claims_qa.line_of_business.medicaid import MedicaidTrigger
+from claims_qa.line_of_business.medicare import MedicareTrigger
+from claims_qa.line_of_business.commercial import CommercialTrigger
+
+class TriggerPipeline(MedicaidTrigger, MedicareTrigger, CommercialTrigger):
+    def __init__(self, query, claim_id, line_of_business):
+        self.query = query
+        self.claim_id = claim_id
+        self.line_of_business = line_of_business
+        
+        if self.line_of_business == 'Medicaid':
+            super(TriggerPipeline, self).__init__()
+        elif self.line_of_business == 'Medicare':
+            super(TriggerPipeline, self).__init__()
+        elif self.line_of_business == 'Commercial':
+            super(TriggerPipeline, self).__init__()
+        else:
+            raise ValueError('Invalid line of business')
+    
+    def pipeline(self):
+        query_category = self.query_classification()
+        data_sources = self.get_data_sources()
+        data = self.get_data(data_sources)
+        presented_data = self.present_data(data)
+        
+        if query_category == 'pre-defined':
+            answer = self.get_pre_defined_answer(presented_data)
+        else:
+            answer = self.get_llm_answer(presented_data)
+        
+        return answer
+===================
+
+
+=================================
+import yaml
+from pydantic import BaseModel, List
+from typing import Dict, Any
+
+class ClaimLineItem(BaseModel):
+    CDML_SEQ_NO: int
+    CDML_AG_PRICE: float
+    CDML_UNITS_ALLOW: float
+    CDML_CHG_AMT: float
+
+class Claim(BaseModel):
+    CLCL_ID: str
+    PRPR_NAME: str
+    AGAG_ID: str
+    claim_line_items: List[ClaimLineItem]
+
+# Sample JSON response structure data
+claim_summary_response = {
+    'Data': {
+        'ClaimSummary': {
+            'REC_CIV8': {
+                'CLCL_ID': '0000576423884',
+                'SBSB_CK': 1505023450,
+                'CLCL_TOT_CHG': 20.0,
+                'CLCL_CUR_STS': '01',
+                'AGAG_ID': 'MA09NPP100',
+                'PRPR_NAME': 'ramesh'
+            },
+            'LineItemsSummary': [
+                {'CDML_COPAY_AMT': 0.0, 'PSCD_ID': '11', 'CDML_SEQ_NO': 1}
+            ],
+            'ClaimStatus': [{'CLST_STS': '01'}]
+        }
+    }
+}
+
+claims_inquiry_line_details_response = {
+    'Data': {
+        'Claim': {
+            'CDT0_COLL': [
+                {'CDML_SEQ_NO': 1, 'CDML_AG_PRICE': 100.0, 'CDML_UNITS_ALLOW': 0.0, 'CDML_CHG_AMT': 0.0},
+                {'CDML_SEQ_NO': 2, 'CDML_AG_PRICE': 110.0, 'CDML_UNITS_ALLOW': 0.0, 'CDML_CHG_AMT': 25.0}
+            ],
+            'REC_CLT0': 'REC_CLCB',
+            'CLCB_COB_AMT': 100.0,
+            'CLCB_COB_ALLOW': 0.0,
+            'CLCB_COB_COPAY_AMT': 0.0
+        }
+    }
+}
+
+# YAML file for required fields
+fields = yaml.safe_load('''
+claim_summary:
+  - ClaimSummary.REC_CIV8
+  - ClaimSummary.LineItemsSummary
+  - ClaimSummary.ClaimStatus
+claims_inquiry_line_details:
+  - Claim.CDT0_COLL
+  - Claim.REC_CLT0
+  - Claim.CLCB_COB_AMT
+  - Claim.CLCB_COB_ALLOW
+  - Claim.CLCB_COB_COPAY_AMT
+''')
+
+# Define the data source classes
+class RestApiDataSource:
+    def __init__(self, endpoint: str):
+        self.endpoint = endpoint
+
+    def fetch_data(self) -> Dict:
+        # Implement REST API data fetching logic
+        pass
+
+class SnowflakeDBDataSource:
+    def __init__(self, endpoint: str):
+        self.endpoint = endpoint
+
+    def fetch_data(self) -> Dict:
+        # Implement Snowflake DB data fetching logic
+        pass
+
+# Define the data presentation classes
+class RestApiDataPresenter:
+    def __init__(self, data: Dict):
+        self.data = data
+
+    def present_data(self) -> Claim:
+        # Implement REST API data presentation logic
+        pass
+
+class SnowflakeDBDataPresenter:
+    def __init__(self, data: Dict):
+        self.data = data
+
+    def present_data(self) -> Claim:
+        # Implement Snowflake DB data presentation logic
+        pass
+
+# Usage
+rest_api_data_source = RestApiDataSource('https://example.com/claim_summary')
+data = rest_api_data_source.fetch_data()
+
+# Validate the data using Pydantic
+claim = Claim(**{field: data[field] for field in fields['claim_summary']})
+
+# Present the data
+result = RestApiDataPresenter(claim).present_data()
+print(result)
+
+=================
+def fetch_data(yaml_file: str, api_response: Dict) -> Dict:
+    # Load the YAML file
+    with open(yaml_file, 'r') as file:
+        fields = yaml.safe_load(file)
+
+    # Initialize an empty dictionary to store the fetched data
+    fetched_data = {}
+
+    # Iterate over each field in the YAML file
+    for field in fields:
+        # Split the field into its path components
+        path_components = field.split('.')
+
+        # Initialize a variable to store the current data
+        current_data = api_response
+
+        # Iterate over each path component
+        for component in path_components:
+            # Check if the component is a list
+            if component.endswith('[]'):
+                component = component[:-2]
+
+            # Check if the component is a dictionary
+            if isinstance(current_data, dict):
+                # Get the value of the component
+                current_data = current_data.get(component, {})
+            elif isinstance(current_data, list):
+                # Get the value of the component
+                current_data = [item.get(component, {}) for item in current_data]
+
+        # Add the fetched data to the result
+        fetched_data[field] = current_data
+
+    return fetched_data
+=====================================
+import yaml
+
+# fields.yaml
+LineDetails:
+  path: Data.LineDetails.REC_CIV9
+  fields:
+    - CLCL_ID
+    - CDML_SEQ_NO
+    - IPCD_ID
+    - CDML_CHG_AMT
+    - CDML_UNITS_ALLOW
+    - CDML_DED_AMT
+    - CDML_COPAY_AMT
+    - CDML_PAID_AMT
+    - AGAG_ID
+    - PRPR_NAME
+    - IPCD_DESC
+  type: dict
+
+LineLevelOverrides:
+  path: Data.LineDetails.LineLevelOverrides
+  fields:
+    - CLCL_ID
+    - MEME_CK
+    - EXCD_ID
+  type: list
+
+LineItemPricing:
+  path: Data.LineDetails.LineItemPricing
+  fields:
+    - AGAG_ID
+    - CDML_SE_PRICE
+  type: dict
+
+
+def fetch_data(yaml_file: str, api_response: dict) -> dict:
+    # Load the YAML file
+    with open(yaml_file, 'r') as file:
+        fields = yaml.safe_load(file)
+
+    # Initialize dictionaries to store the fetched data
+    line_details = {}
+    line_overrides = []
+    line_item_pricing = {}
+
+    # Fetch data from each section
+    for section, config in fields.items():
+        path_components = config['path'].split('.')
+        current_data = api_response
+        for component in path_components:
+            current_data = current_data.get(component, {})
+        if config['type'] == 'dict':
+            for field in config['fields']:
+                if section == 'LineDetails':
+                    line_details[field] = current_data.get(field)
+                elif section == 'LineItemPricing':
+                    line_item_pricing[field] = current_data.get(field)
+        elif config['type'] == 'list':
+            for item in current_data:
+                override = {}
+                for field in config['fields']:
+                    override[field] = item.get(field)
+                line_overrides.append(override)
+
+    return {
+        'LineDetails': line_details,
+        'LineLevelOverrides': line_overrides,
+        'LineItemPricing': line_item_pricing
+    }
+===================================
+# fields.yaml
+ClaimSummary:
+  path: Data.ClaimSummary.REC_CIV8
+  fields:
+    - CLCL_ID
+    - AGAG_ID
+    - PRPR_NAME
+  type: dict
+
+import yaml
+
+def fetch_data(yaml_file: str, api_response: dict) -> dict:
+    # Load the YAML file
+    with open(yaml_file, 'r') as file:
+        fields = yaml.safe_load(file)
+
+    # Initialize a dictionary to store the fetched data
+    fetched_data = {}
+
+    # Fetch data from each section
+    for section, config in fields.items():
+        path_components = config['path'].split('.')
+        current_data = api_response
+        for component in path_components:
+            current_data = current_data.get(component, {})
+        if config['type'] == 'dict':
+            for field in config['fields']:
+                fetched_data[field] = current_data.get(field)
+
+    return fetched_data
+
+======================================
+class ClaimLineItem(BaseModel):
+    CDML_SEQ_NO: int
+    CDML_COPAY_AMT: float
+    CDML_UNITS_ALLOW: float
+    CDML_CHG_AMT: float
+
+class Claim(BaseModel):
+    CLCL_ID: str
+    PRPR_NAME: str
+    AGAG_ID: str
+    claim_line_items: List[ClaimLineItem]
+
+from pydantic import BaseModel, List
+
+class ClaimLineItem(BaseModel):
+    CDML_SEQ_NO: int
+    CDML_COPAY_AMT: float
+    CDML_UNITS_ALLOW: float
+    CDML_CHG_AMT: float
+
+class Claim(BaseModel):
+    CLCL_ID: str
+    PRPR_NAME: str
+    AGAG_ID: str
+    claim_line_items: List[ClaimLineItem]
+
+def project_data(claim_summary: dict, claim_line_items: dict) -> Claim:
+    claim_line_items_list = []
+    for item in claim_line_items['LineLevelOverrides']:
+        claim_line_items_list.append(ClaimLineItem(**item))
+
+    return Claim(
+        CLCL_ID=claim_summary['CLCL_ID'],
+        PRPR_NAME=claim_summary['PRPR_NAME'],
+        AGAG_ID=claim_summary['AGAG_ID'],
+        claim_line_items=claim_line_items_list
+    )
+
+
+claim_summary_response = {
+    'Data': {
+        'ClaimSummary': {
+            'REC_CIV8': {
+                'CLCL_ID': '0000576423884',
+                'SBSB_CK': 1505023450,
+                'CLCL_TOT_CHG': 20.0,
+                'CLCL_CUR_STS': '01',
+                'AGAG_ID': 'MA09NPP100',
+                'PRPR_NAME': 'ramesh'
+            }
+        }
+    }
+}
+
+claim_line_details_response = {
+    'Data': {
+        'LineDetails': {
+            'REC_CIV9': {
+                'CLCL_ID': '000984495000',
+                'CDML_SEQ_NO': 1,
+                'CDML_FROM_DT': '2023-10-16T00:00:00',
+                'CDML_TO_DT': '2023-10-16T00:00:00',
+                'IPCD_ID': '11',
+                'CDML_CHG_AMT': 20.0,
+                'CDML_UNITS_ALLOW': 1,
+                'CDML_DED_AMT': 0.0,
+                'CDML_COPAY_AMT': 0.0,
+                'CDML_PAID_AMT': 0.0,
+                'AGAG_ID': 'MA00NTOP800',
+                'PRPR_NAME': 'Ranesh',
+                'IPCD_DESC': 'office or medical payment'
+            }
+        }
+    }
+}
+
+claim_summary = fetch_data('claim_summary_fields.yaml', claim_summary_response)
+claim_line_items = fetch_data('claim_line_items_fields.yaml', claim_line_details_response)
+
+claim = project_data(claim_summary, claim_line_items)
+
+print(claim)
