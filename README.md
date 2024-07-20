@@ -1,2 +1,2 @@
 # practice
-language or algorithm, best way to use.
+language or algorithm, best way to use..
