@@ -509,3 +509,76 @@ def test_generate_text_empty_response(mock_create):
         messages=[{"role": "user", "content": prompt}]
     )
 """
+
+"""
+Creating effective prompts for an LLM (like OpenAI's GPT) is essential for getting precise and useful responses, especially when building a test framework that generates unit tests based on Python functions or class methods. Below, I provide tailored prompts for each step of your outlined process, focusing on clarity and specificity to ensure the LLM understands the task at hand.
+Step 1: Get All Test Case Scenarios
+Prompt:
+text
+You are an AI assistant tasked with generating test case scenarios for a given Python function or class method. Please analyze the following definition and provide a comprehensive list of potential test cases that cover various aspects of the function's behavior, including edge cases, typical use cases, and any expected exceptions.
+
+Function/Class Definition:
+{function_definition}
+
+Step 2: Classify Function Complexity
+Prompt:
+text
+Analyze the following Python function or class method definition to determine its complexity. Classify it as 'simple' or 'complex'. A function is considered simple if it has no dependencies on other modules or functions. A function is considered complex if it has dependencies, such as calls to other functions, methods, or external resources.
+
+Function/Class Definition:
+{function_definition}
+
+Step 3: Generate Test Code for Simple Functions
+Prompt:
+text
+Given the following simple Python function or class method definition, generate the appropriate unit test code using the pytest framework. Ensure that the tests cover all relevant scenarios identified in the previous step.
+
+Function/Class Definition:
+{function_definition}
+
+Step 4: Ask Clarifying Questions for Complex Functions
+Prompt:
+text
+The following Python function or class method is classified as complex due to its dependencies. Based on the function definition and identified dependencies, please generate a list of clarifying questions that I should ask the user to gather the necessary information for creating mock objects and defining data samples.
+
+Function/Class Definition:
+{function_definition}
+
+Identified Dependencies:
+{dependencies}
+
+Step 5: Mock Dependencies
+Prompt:
+text
+Based on the following Python function or class method definition and the identified dependencies, generate the mock objects necessary for unit testing. Ensure that the mocks accurately simulate the behavior of the dependencies, and provide example implementations for each mock.
+
+Function/Class Definition:
+{function_definition}
+
+Identified Dependencies:
+{dependencies}
+
+Step 6: Generate Test Code with Mocks and Clarified Information
+Prompt:
+text
+Using the following Python function or class method definition, identified test cases, clarified user responses, and mocked dependencies, generate the complete unit test code using the pytest framework. Ensure that the tests are comprehensive and cover all relevant scenarios.
+
+Function/Class Definition:
+{function_definition}
+
+Test Cases:
+{test_cases}
+
+Clarified User Responses:
+{user_responses}
+
+Mocked Dependencies:
+{mocked_dependencies}
+
+Additional Tips for Effective Prompts
+Be Specific: Clearly define what you expect in the response. Use precise language to avoid ambiguity.
+Provide Context: Include relevant details in the prompt to help the LLM understand the task better.
+Use Examples: Whenever possible, provide examples of what you expect in the response to guide the LLM.
+Iterate: If the initial responses are not satisfactory, refine your prompts based on the output you receive.
+By following these structured prompts for each step of your process, you should be able to elicit more accurate and useful responses from the LLM, ultimately aiding in the development of your test framework. If you have any further questions or need additional assistance, feel free to ask!
+"""
