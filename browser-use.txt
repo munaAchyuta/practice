@@ -1,0 +1,193 @@
+pip install browser-use playwright fastapi uvicorn
+playwright install
+
+--------------------------------------------------------------
+
+import asyncio
+from browser_use import Browser, BrowserConfig
+
+async def save_auth_session():
+    # 1. Launch a headful browser so you can see and type
+    browser = Browser(config=BrowserConfig(
+        headless=False,  # Visible browser
+        disable_security=True # Often needed for enterprise internal sites
+    ))
+    
+    # 2. Open the browser and let you login
+    print("🔴 Browser opening... Please log in to your application manually.")
+    print("🔴 Close the browser window when you are done to save the session.")
+    
+    # This keeps the browser open until you close the window
+    await browser.close() 
+    
+    # Note: In a real scenario, we'd use a specific context context save.
+    # Since browser-use abstracts this, a robust way is to use raw playwright 
+    # just for this auth step if you need fine-grained control, 
+    # but browser-use agents can also reuse 'user_data_dir'.
+    
+    # ALTERNATIVE: Using Raw Playwright to strictly dump auth.json
+    # This is often more reliable for the 'Save Once' step.
+    from playwright.async_api import async_playwright
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context()
+        page = await context.new_page()
+        
+        await page.goto("https://your-enterprise-app-url.com/login")
+        print("Waiting for you to log in... Press Enter in this terminal when finished.")
+        input() 
+        
+        # Save the state (cookies, local storage) to a file
+        await context.storage_state(path="auth.json")
+        print("✅ Session saved to 'auth.json'")
+        await browser.close()
+
+if __name__ == "__main__":
+    asyncio.run(save_auth_session())
+
+--------------------------------------------------------------
+
+import os
+import asyncio
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from browser_use import Agent, Controller
+from browser_use.browser.browser import Browser, BrowserConfig
+from browser_use.browser.context import BrowserContextConfig
+from langchain_openai import ChatOpenAI
+
+# Configuration
+os.environ["OPENAI_API_KEY"] = "sk-..."  # Set your key here or in env vars
+
+app = FastAPI()
+
+# Input model for the API
+class UserRequest(BaseModel):
+    instruction: str
+
+@app.post("/run-agent")
+async def run_enterprise_agent(request: UserRequest):
+    """
+    Takes a user instruction, spawns an isolated browser agent 
+    with pre-authenticated session, and returns the result.
+    """
+    try:
+        # 1. Configure the browser to use the saved Auth File
+        # This loads cookies/local storage from Step 1
+        browser = Browser(
+            config=BrowserConfig(
+                headless=True,  # Headless for server environment
+                disable_security=True, # Bypass some SSL/CORS issues on corp networks
+                new_context_config=BrowserContextConfig(
+                    storage_state="./auth.json", # <--- LOADS SAVED SESSION
+                    browser_window_size={'width': 1920, 'height': 1080},
+                    save_recording_path="./recordings" # Optional: saves video of action
+                )
+            )
+        )
+
+        # 2. Initialize the LLM (Use AzureChatOpenAI for enterprise security if needed)
+        llm = ChatOpenAI(model="gpt-4o", temperature=0)
+
+        # 3. Create the Agent
+        # The agent receives the pre-configured browser
+        agent = Agent(
+            task=request.instruction,
+            llm=llm,
+            browser=browser,
+            use_vision=True,   # Essential for "seeing" buttons/layouts
+            save_conversation_path="logs/conversation.json"
+        )
+
+        # 4. Run the agent
+        # The library handles the loop: Thought -> Action -> Observation
+        history = await agent.run()
+
+        # 5. Extract Result & Clean up
+        result = history.final_result()
+        await browser.close()
+        
+        return {
+            "status": "success",
+            "result": result,
+            "actions_taken": [action.model_dump() for action in history.model_actions()],
+            # You can return paths to screenshots taken by the agent here if needed
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# To run: uvicorn filename:app --host 0.0.0.0 --port 8000 --workers 4
+
+---------------------------------------------------------------
+
+
+import os
+import asyncio
+from browser_use import Agent
+from browser_use.browser.browser import Browser, BrowserConfig
+from browser_use.browser.context import BrowserContextConfig
+from langchain_openai import ChatOpenAI # Or your enterprise LLM wrapper
+
+# --- CONFIGURATION ---
+# 1. Directory to save your proof-of-work screenshots
+SCREENSHOT_DIR = "./agent_evidence"
+os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+
+async def run_enterprise_task(instruction: str):
+    # 2. Initialize Browser with Persistence
+    # We use specific window size to ensure layouts render correctly in headless mode
+    browser = Browser(
+        config=BrowserConfig(
+            headless=True,  # REQUIRED for Linux servers
+            disable_security=True, # Helps with internal enterprise certs
+            new_context_config=BrowserContextConfig(
+                storage_state="./auth.json", # Load your saved login session
+                browser_window_size={'width': 1280, 'height': 1080} 
+            )
+        )
+    )
+
+    # 3. Define the Callback to Capture Screenshots
+    # This runs automatically after every step the agent takes
+    async def save_screenshot_callback(state, output, step_number):
+        try:
+            page = await browser.get_current_page()
+            filename = f"{SCREENSHOT_DIR}/step_{step_number}.png"
+            await page.screenshot(path=filename)
+            print(f"📸 Screenshot saved: {filename}")
+        except Exception as e:
+            print(f"⚠️ Failed to take screenshot: {e}")
+
+    # 4. Initialize Text-Only LLM
+    # Set temperature=0 for consistent, robotic execution
+    llm = ChatOpenAI(model="gpt-4o", temperature=0) 
+
+    # 5. Create Agent with Vision DISABLED
+    agent = Agent(
+        task=instruction,
+        llm=llm,
+        browser=browser,
+        use_vision=False,  # <--- Disables Vision LLM requirement
+        register_new_step_callback=save_screenshot_callback # <--- Inject our screenshot logic
+    )
+
+    try:
+        print(f"🚀 Starting Task: {instruction}")
+        history = await agent.run()
+        result = history.final_result()
+        
+        print("\n✅ Task Completed.")
+        print(f"Result: {result}")
+        print(f"Evidence saved in: {os.path.abspath(SCREENSHOT_DIR)}")
+        
+    except Exception as e:
+        print(f"❌ Error during execution: {e}")
+    finally:
+        await browser.close()
+
+if __name__ == "__main__":
+    # Example Instruction
+    task = "Go to github.com/browser-use, click on the License file, and tell me what type of license it is."
+    asyncio.run(run_enterprise_task(task))
