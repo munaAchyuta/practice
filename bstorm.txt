@@ -1,0 +1,963 @@
+-----------------------------------------
+This is a classic Enterprise legacy modernization problem where **AI Agents** are a perfect fit to bridge the gap between unstructured decision-making (reading BPDs, checking JIRA ambiguity) and structured execution (Mainframe/VAS interaction).
+
+As an AI Architect, my strategic input focuses on moving away from a monolithic RPA approach (which breaks easily when UI changes) toward a **Multi-Agent System (MAS)** orchestrated by a state machine.
+
+Here is the High-Level Design (HLD) and Strategic Blueprint.
+
+---
+
+### 1. Strategic Approach: The "Supervisor-Worker" Pattern
+
+We will not build a single "Super Agent." Instead, we will implement a **Hierarchical Multi-Agent System**.
+
+*   **Why?** The process involves distinct cognitive modes. Checking for ambiguity in text (Step 2) is a linguistic task. Verifying data across Mainframes (VAS) and Web Apps (MUS) (Step 3) is a structured data task. Creating test beds (Step 5) is a creative/logic task.
+*   **Control Flow:** We will use a **State Graph (e.g., LangGraph)** to manage the workflow. This ensures that if Step 4 fails, the system knows exactly where to retry without restarting the whole process.
+
+### 2. High-Level Design (HLD)
+
+The architecture consists of three layers: The **Orchestration Layer**, the **Agent Layer**, and the **Tool Integration Layer**.
+
+#### The Workflow Architecture
+
+```mermaid
+graph TD
+    User(JIRA Webhook) -->|New/Update Ticket| Supervisor
+    
+    subgraph "AI Agent Orchestration Layer"
+        Supervisor{Supervisor Agent}
+        
+        Supervisor -->|1. Triage| TriageAgent[Triage & Ambiguity Agent]
+        Supervisor -->|2. Verify| ValidationAgent[Plan Validation Agent]
+        Supervisor -->|3. Setup| DataPrepAgent[Test Data Agent]
+        Supervisor -->|4. Execute| ExecutionAgent[Claim Execution Agent]
+    end
+    
+    subgraph "Tool & Skill Layer"
+        TriageAgent -->|Read| JIRA_API
+        
+        ValidationAgent -->|RAG/OCR| BPD_Doc_Reader
+        ValidationAgent -->|SQL/3270| VAS_Connector
+        ValidationAgent -->|Scrape/API| MUS_Connector
+        
+        DataPrepAgent -->|API/RPA| FTI_Tool_Wrapper
+        
+        ExecutionAgent -->|Script| Excel_Macro_Runner
+        ExecutionAgent -->|Write| JIRA_Updater
+    end
+    
+    TriageAgent -->|Ambiguous?| Supervisor
+    Supervisor -->|If Ambiguous| JIRA_Updater(Comment on JIRA for Human)
+    Supervisor -->|If Clear| ValidationAgent
+```
+
+---
+
+### 3. Detailed Agent Personas
+
+We will define 4 distinct Agents. Each has a specific "System Prompt" and a specific set of "Tools."
+
+#### Agent 1: The Triage Agent (The "Gatekeeper")
+*   **Responsibility:** Step 1 & 2.
+*   **Input:** JIRA Ticket Metadata & Description.
+*   **Goal:** Determine if the request is "Actionable" or "Ambiguous."
+*   **Cognitive Task:** It compares the ticket description against a "Rule of Completeness" (e.g., *Does it have the Group Suffix? Is the Contract Code valid format?*).
+*   **Action:**
+    *   *If Ambiguous:* Calls `create_jira_subtask` assigning it back to the Lead with specific questions.
+    *   *If Clear:* Signals the Supervisor to proceed to Validation.
+
+#### Agent 2: The Validator Agent (The "Auditor")
+*   **Responsibility:** Step 3 (The 4-step validation).
+*   **Challenge:** Comparing Unstructured data (BPD Doc on MUS) vs. Structured data (VAS Mainframe).
+*   **Strategy:**
+    *   **Tool A (BPD Ingestion):** Uses OCR/RAG to read the BPD from MUS. It extracts key benefits (Co-pay, Deductible, OOP Max) into a standardized JSON object.
+    *   **Tool B (Legacy Fetch):** Connects to VAS (via Mainframe terminal emulation or API) and CEP/PEG to fetch the programmed values.
+    *   **Logic:** Performs a deterministic comparison.
+    *   *Fail State:* If JIRA ≠ BPD ≠ VAS, it raises a flag immediately.
+
+#### Agent 3: The Test Engineer Agent (The "Builder")
+*   **Responsibility:** Steps 4, 5, & 6 (FTI Interactions).
+*   **Cognitive Task:** Translating human intent ("Test for diabetic copay waiver") into FTI technical inputs.
+*   **Strategy:**
+    *   It queries the FTI tool (likely via an API wrapper or headless browser) to pull Member IDs.
+    *   It generates the **Test Bed Scenario**. *This is where GenAI shines.* It takes the BPD JSON from Agent 2 and constructs the exact test parameters required by FTI.
+    *   It instructs FTI to create the claim.
+
+#### Agent 4: The Adjudicator Agent (The "Closer")
+*   **Responsibility:** Step 7.
+*   **Strategy:**
+    *   Instead of relying on the user's Excel Macro physically opening on a desktop, we should try to **port the Macro logic to Python** (Pandas/OpenPyXL) if possible.
+    *   If the Macro is too complex (legacy VBA), the Agent triggers a "Headless RPA Bot" to run the Excel sheet on a VM.
+    *   **Outcome:** It parses the result. If `Success`, it closes the JIRA parent task. If `Fail`, it creates a detailed Bug Sub-task with logs.
+
+---
+
+### 4. Key Technical Challenges & Solutions
+
+As an architect, these are the friction points I foresee and how to solve them:
+
+#### Challenge A: Interacting with VAS (Mainframe)
+*   **Problem:** Mainframes don't usually have REST APIs.
+*   **Solution:** Do not make the LLM type into a black screen.
+    *   *Option 1 (Modern):* Check if there is a CICS Transaction Gateway or DB2 Connect available to query VAS data via SQL.
+    *   *Option 2 (Legacy):* Build a **Python Tool (using `py3270`)** that screens-scrapes specific fields. The Agent calls `get_vas_plan_details(contract_id)` and receives a clean JSON.
+
+#### Challenge B: The BPD Document (Unstructured Data)
+*   **Problem:** MUS contains the BPD, which is likely a PDF or Word doc.
+*   **Solution:** **RAG (Retrieval Augmented Generation).**
+    *   When the process starts, download the BPD.
+    *   Chunk the text and vectorize it.
+    *   The Validator Agent asks: "What is the Specialist Co-pay listed in the BPD?" to extract the ground truth.
+
+#### Challenge C: Latency & State
+*   **Problem:** FTI might take 5 minutes to create a test bed. We can't have an LLM "waiting" (time out).
+*   **Solution:** **Asynchronous Architecture (Event-Driven).**
+    *   The Agent triggers FTI and "suspends" its state.
+    *   When FTI finishes, it sends a webhook back to the Agent framework to "wake up" and proceed to Step 6.
+
+---
+
+### 5. Recommended Tech Stack
+
+1.  **Orchestration Framework:** **LangGraph** (Python). It is superior for cyclic workflows (loops, retries, human-interrupts) compared to linear chains.
+2.  **LLM:** **GPT-4o** or **Claude 3.5 Sonnet**. You need high reasoning capabilities for interpreting the BPD documents and resolving ambiguity.
+3.  **Integration Layer:**
+    *   **JIRA:** Python `jira` library.
+    *   **VAS (Mainframe):** `py3270` (for screen scraping) or IBM z/OS Connect.
+    *   **MUS (Web):** `Playwright` or `Selenium` (headless mode) for navigating the web app.
+4.  **Vector DB (for BPD comparison):** **ChromaDB** or **FAISS** (lightweight, local).
+
+### 6. Implementation Roadmap
+
+1.  **Phase 1: The "Listener" & "Triage" (Steps 1-2):**
+    *   Build the JIRA listener.
+    *   Build the Triage Agent to read the ticket and categorize it.
+    *   *Value:* Immediate reduction in "Clarification" delays.
+2.  **Phase 2: The "Reader" (Step 3):**
+    *   Build the connectors to MUS and VAS.
+    *   Implement the comparison logic.
+    *   *Value:* Automates the most error-prone manual validation step.
+3.  **Phase 3: The "Executor" (Steps 4-7):**
+    *   Integrate with FTI and the Excel Macro.
+    *   *Value:* Full End-to-End automation.
+
+### Final Thought
+The critical success factor here is **Tool Abstraction**. Do not let the Agents hallucinate mainframe commands. Build robust Python functions (Tools) that do the hard work (connection, login, data fetch), and let the Agents strictly handle the **Logic, Reasoning, and Workflow Orchestration**.
+
+-----------------------------------------
+This is excellent news. Having direct **DB2 access** fundamentally changes the reliability of the architecture (for the better), and the **Async approach** confirms you are building a resilient system rather than a brittle script.
+
+Since you are asking for a "Deep Think" strategy, I will move away from generic advice and give you the **Architectural Blueprint** for building this.
+
+Here is the detailed design strategy focusing on the **Data Pattern**, **State Management**, and the **Agent logic**.
+
+---
+
+### 1. Core Architectural Pattern: The "Canonical Data Model" Strategy
+
+The biggest technical risk in Step 3 (Validation) is comparing apples (Unstructured PDF text) to oranges (DB2 rows) to pears (JIRA text).
+
+**The Strategy:** Do not ask the Agent to "compare PDF to DB2" directly. Instead, convert all sources into a single **Intermediate Canonical JSON Format**.
+
+#### The Canonical Schema (Pydantic/JSON)
+You need to define a strict Data Model that represents a "Plan Benefit."
+```json
+{
+  "contract_code": "XYZ123",
+  "group_suffix": "001",
+  "effective_date": "2024-01-01",
+  "benefits": {
+     "office_visit_copay": 20.00,
+     "er_copay": 150.00,
+     "deductible_individual": 2000.00,
+     "oop_max_family": 8000.00
+  }
+}
+```
+
+**How the Agents work with this:**
+1.  **The Extractor (RAG):** Reads the 50-page BPD PDF and fills this JSON schema.
+2.  **The SQL Mapper:** Queries DB2 (VAS) and maps the result columns into this *same* JSON schema.
+3.  **The Comparator:** Now you are just comparing `JSON_A` vs `JSON_B`. This is deterministic code, not AI guessing. This eliminates 99% of hallucinations during validation.
+
+---
+
+### 2. The Orchestration Design (State Machine)
+
+Since you are using an Async flow, you cannot use a simple linear chain. You need a **State Graph** (e.g., utilizing LangGraph or Temporal.io) with **Persistence**.
+
+**Why Persistence?** When the Agent triggers FTI (Step 6) and waits 30 minutes, the Agent process might spin down. The state (Context) must be saved in a DB (Postgres/Redis). When the webhook/poll returns "Complete," the Agent "rehydrates" its memory and resumes at Step 7.
+
+#### The State Flow Design:
+
+1.  **State: Triage (Agent 1)**
+    *   *Input:* JIRA Payload.
+    *   *Logic:* Check specific fields.
+    *   *Decision:* Ambiguous? -> `State: Clarification_Wait`. Clear? -> `State: Validation`.
+2.  **State: Validation (Agent 2)**
+    *   *Parallel Sub-tasks:*
+        *   Task A: Fetch BPD from MUS -> Run RAG -> Output `BPD_JSON`.
+        *   Task B: Fetch JIRA Data -> Output `JIRA_JSON`.
+        *   Task C: Query VAS (DB2) -> Output `VAS_JSON`.
+        *   Task D: Query CEP/PEG -> Output `CEP_JSON`.
+    *   *Logic:* `Diff(BPD, VAS, CEP, JIRA)`.
+    *   *Decision:* Mismatch? -> `State: Failure_Report`. Match? -> `State: Provisioning`.
+3.  **State: Provisioning (Agent 3)**
+    *   *Action:* Call FTI Tool Service (Member Fetch).
+    *   *Action:* Call FTI Tool Service (Test Bed Creation).
+    *   *Transition:* Move to `State: Async_Wait`.
+4.  **State: Async_Wait (System)**
+    *   System pauses. Poller/Webhook checks FTI status.
+    *   *Trigger:* Status = 'Ready' -> `State: Execution`.
+5.  **State: Execution (Agent 4)**
+    *   *Action:* Trigger Test Claims (FTI).
+    *   *Action:* Trigger Claim Validation (Excel/Macro Service).
+    *   *Final Decision:* Pass -> Close JIRA. Fail -> Open Defect.
+
+---
+
+### 3. Deep Dive: The "Tool Services" Layer
+
+You mentioned separating tools. Here is how those specific services should be architected for the Agents to consume.
+
+#### Tool A: The DB2 Retriever (VAS Interface)
+*   **The Risk:** Agents writing bad SQL.
+*   **The Solution:** **Text-to-SQL is risky here.** Instead, use **Parameter Injection**.
+*   **Design:** Create a set of predefined, optimized SQL queries exposed as Python functions.
+    *   *Agent Call:* `get_vas_plan_data(contract="ABC", suffix="01")`
+    *   *Backend:* Executes a pre-vetted SQL `SELECT * FROM PLAN_TABLE WHERE ...`
+    *   *Result:* Returns the structured data.
+    *   *Why:* This ensures the Agent never accidentally drops a table or runs a query that locks the mainframe DB.
+
+#### Tool B: The "Document Reader" (RAG for BPD)
+*   **The Strategy:** Since the PDF is 50 pages, standard RAG (chunks) might miss the "context" of a specific table row (e.g., seeing "$20" but missing that it belongs to the "Out of Network" column).
+*   **Recommendation:** Use a **Vision-Language Model (VLM)** or a parser like **LlamaParse** or **Azure Document Intelligence**. These tools understand tables in PDFs.
+*   **Workflow:**
+    1.  Convert PDF tables to Markdown/JSON.
+    2.  Feed that structure to the LLM.
+    3.  Prompt: *"Extract the In-Network Individual Deductible from the Benefit Summary table."*
+
+#### Tool C: The FTI & Excel Wrapper
+*   **The Strategy:** Since FTI and the Excel Macro are likely Windows-based legacy apps, you cannot run them inside a Linux container where the AI lives.
+*   **Implementation:** Create a **"Runner Agent"** (a small Python script) installed on a dedicated Windows VM.
+*   **Communication:** The Main AI Architect sends a message (RabbitMQ or REST) to the Windows VM: `{"action": "run_macro", "file_path": "..."}`. The Windows VM executes it and reports back.
+
+---
+
+### 4. Data Flow & Security
+
+Since this is Health Insurance (HIPAA implication likely, or at least PII), we need strict guardrails.
+
+1.  **PII Masking:** When pulling "Member IDs" from FTI (Step 4), do not feed real member names or sensitive info into the LLM Prompt context if you are using a public model (like OpenAI).
+2.  **Tokenization:** Pass only the Member ID (e.g., `MEM123456`). The LLM doesn't need to know the name.
+3.  **Audit Trail:** Every decision the Agent makes (e.g., "I decided to pass this validation because BPD matches VAS") must be logged to a specific DB table, separate from JIRA comments. This is crucial for EBA audits.
+
+### 5. Summary of the Strategy
+
+1.  **Do not be monolithic.** Use a State Machine (LangGraph).
+2.  **Standardize Data First.** Create a "Canonical JSON" for Plans. Map PDF and DB2 to this JSON before comparing.
+3.  **Safe SQL.** Use pre-defined SQL templates, not free-form SQL generation.
+4.  **Async Persistence.** Save state to a DB while waiting for FTI/Testing tools, using a webhook/poller to resume.
+5.  **Hybrid Compute.** Run the AI logic on the server, but use a "Satellite Worker" on a Windows VM to handle the legacy FTI/Excel Macro interactions.
+
+This approach solves the "Validation Complexity" via the Canonical Model and solves the "Latency/State" via the Async State Machine.
+
+-----------------------------------------
+This is a very sophisticated question. You are essentially asking about **"Functional Decomposition" (Tool-Centric)** vs. **"Process Decomposition" (Domain-Centric)**.
+
+As an Architect, I have seen both implemented. While your proposed approach (One Supervisor + Generic Tool Agents) sounds clean and modular—like microservices—it is generally considered **an anti-pattern for complex Business Process Automation**.
+
+Here is my "Deep Think" analysis on why, and where your strategy might struggle.
+
+### 1. The "Chatty Supervisor" Problem
+
+If you create a **JIRA Agent**, an **FTI Agent**, and a **VAS Agent**, your Supervisor becomes a micromanager.
+
+*   **Scenario:** Validation Step.
+*   **Flow:**
+    1.  Supervisor -> JIRA Agent: "Read ticket."
+    2.  JIRA Agent -> Supervisor: "Here is the data."
+    3.  Supervisor -> MUS Agent: "Read BPD."
+    4.  MUS Agent -> Supervisor: "Here is the BPD JSON."
+    5.  Supervisor -> VAS Agent: "Query DB2."
+    6.  VAS Agent -> Supervisor: "Here is the DB2 data."
+    7.  **Supervisor:** "Now I will compare them."
+
+**The Issue:** You are moving massive amounts of data back and forth between agents. The Supervisor ends up doing all the heavy cognitive lifting (the comparison logic). The "Sub-Agents" aren't really *Agents*; they are just expensive, slow wrappers around API calls.
+
+### 2. Cognitive Load and Context Window
+
+In the Tool-Centric approach, the Supervisor needs to know **everything**:
+*   It needs to know the business logic of Validation.
+*   It needs to know the business logic of Test Bed Creation.
+*   It needs to know the error handling for Claim Execution.
+
+This makes the Supervisor's system prompt huge and complex. Large Language Models (LLMs) degrade in performance when their instructions get too broad. They start forgetting rules ("hallucination").
+
+### 3. The "Loss of Nuance"
+
+Let's look at the **FTI Tool**.
+*   If you have a generic "FTI Agent," it only knows how to operate the tool (Click, Type, Submit).
+*   However, **creating a Test Bed** (Step 5) requires understanding the *Medical Policy* (Domain knowledge).
+*   If the FTI tool throws a "soft error" (e.g., "Conflict with Benefit Code"), a generic FTI Agent won't know what to do. It will just report "Error" to the Supervisor.
+*   A **"Test Engineer Agent"** (Domain-centric) would understand that error *in the context of the claim* and might try a different Benefit Code automatically.
+
+### My Recommendation: Agents should own "Outcomes," not "Tools"
+
+Instead of organizing by **Software (JIRA, FTI, VAS)**, organize by **Job Function**.
+
+Think of it like a construction site:
+*   **Your Proposal:** You have a "Hammer Agent," a "Saw Agent," and a "Drill Agent." The Supervisor has to tell them exactly when to swing or cut.
+*   **My Recommendation:** You have a "Framer," a "Plumber," and an "Electrician." They all use hammers and drills, but they know *how* to build their specific part of the house.
+
+### The Hybrid "Sweet Spot"
+
+You should treat JIRA, FTI, and VAS not as *Agents*, but as **Standardized Toolkits (Function Libraries)**.
+
+*   **The Toolkit:** Write robust Python classes for `JiraService`, `FtiService`, `VasDb2Service`.
+*   **The Agents:**
+    1.  **Triage Agent:** Has access to the `JiraService` toolkit.
+    2.  **Validator Agent:** Has access to `VasDb2Service` and `MusService` toolkits.
+    3.  **Tester Agent:** Has access to `FtiService` and `ExcelService` toolkits.
+
+**Why this wins:**
+1.  **Context Isolation:** The Validator Agent doesn't care about FTI. The Tester Agent doesn't care about the BPD PDF. This keeps their prompts clean and focused.
+2.  **Resilience:** If the Validator Agent fails, the Supervisor knows exactly *which stage* of the business process failed, rather than just knowing "The DB2 tool failed."
+3.  **Efficiency:** The Validator Agent can query DB2 and compare it to the BPD internally without passing megabytes of data back to the Supervisor. It just reports: "Validation Passed."
+
+### Conclusion
+
+Don't build **"Proxy Agents"** (agents that just sit in front of a tool). It adds latency and token cost without adding intelligence.
+
+Build **"Domain Agents"** (agents that act like a specific employee role: Auditor, Tester, Manager) and give them the tools they need to do their job.
+
+-----------------------------------------
+This Low Level Design (LLD) translates our architectural strategy into actionable technical specifications. It focuses on **Data Structures**, **API Signatures**, **State Management**, and **Component Interaction**.
+
+### 1. Technical Stack & Specifications
+
+*   **Runtime Environment:** Python 3.11+ (Host), Windows Server VM (Satellite for FTI/Excel).
+*   **Orchestration Framework:** **LangGraph** (built on LangChain). It provides the cyclic graph capabilities and state persistence required.
+*   **LLM:** GPT-4o (for reasoning) / local embeddings (for PDF RAG).
+*   **Database (State Store):** **PostgreSQL**. We will use it for:
+    *   Agent `Checkpoints` (pausing/resuming state).
+    *   Operational Logging (Audit trails).
+*   **DB2 Connector:** `ibm_db` or `sqlalchemy-db2` (for VAS interaction).
+*   **Legacy Bridge:** **FastAPI** running on the Windows VM to expose FTI/Excel as REST endpoints.
+
+---
+
+### 2. Data Model Design
+
+This is the most critical part. We define the **Shared State** that passes between agents.
+
+#### A. The "AgentState" (LangGraph Context)
+This TypedDict is passed to every node in the graph.
+
+```python
+from typing import TypedDict, List, Optional, Dict, Any
+
+class PlanBenefit(TypedDict):
+    # The Canonical Model
+    benefit_code: str
+    description: str
+    network_tier: str # "IN_NETWORK" | "OUT_OF_NETWORK"
+    copay_amount: Optional[float]
+    coinsurance_pct: Optional[float]
+    deductible: Optional[float]
+
+class AgentState(TypedDict):
+    # Metadata
+    jira_ticket_id: str
+    jira_description: str
+    contract_code: str
+    group_suffix: str
+    
+    # Decision Flags
+    is_ambiguous: bool
+    clarification_questions: List[str]
+    validation_passed: bool
+    validation_errors: List[str] # e.g. ["Copay mismatch: BPD=$20, VAS=$25"]
+    
+    # Data Payloads (The Evidence)
+    bpd_extracted_data: Dict[str, Any] # From PDF
+    vas_db_data: Dict[str, Any]        # From DB2
+    
+    # Async Tracking
+    fti_transaction_id: Optional[str]
+    test_execution_status: str # "PENDING", "RUNNING", "COMPLETED", "FAILED"
+```
+
+---
+
+### 3. The Service Layer (Tool Abstractions)
+
+These are the deterministic Python classes that Agents call.
+
+#### Service 1: `VasRepository` (DB2 Interaction)
+Direct SQL access, preventing hallucinated queries.
+
+```python
+class VasRepository:
+    def __init__(self, connection_string):
+        self.conn = ibm_db.connect(connection_string, "", "")
+
+    def get_plan_benefits(self, contract_code: str, suffix: str) -> Dict:
+        """
+        Executes optimized SQL to join Plan, Benefit, and limit tables.
+        Returns: Normalized Dictionary matching the Canonical Model.
+        """
+        sql = """
+            SELECT P.PLAN_ID, B.BNFT_CD, B.COPAY_AMT, B.DED_AMT 
+            FROM EBA.PLAN P
+            JOIN EBA.BENEFIT B ON P.PLAN_ID = B.PLAN_ID
+            WHERE P.CNTRCT_ID = ? AND P.GRP_SFX = ?
+        """
+        # ... execution logic ...
+        return normalized_data
+```
+
+#### Service 2: `MusDocIngestor` (BPD/RAG)
+Handles the 50-page PDF.
+
+```python
+class MusDocIngestor:
+    def retrieve_bpd(self, doc_id: str) -> str:
+        # 1. Download PDF from MUS Web App (Selenium/Requests)
+        # 2. Use LlamaParse or OCR to convert Tables to Markdown
+        return markdown_content
+
+    def query_bpd(self, markdown_content: str, query: str) -> str:
+        # Uses Vector DB + LLM to answer specific questions
+        # e.g., "What is the Specialist Copay?"
+        return llm_response
+```
+
+#### Service 3: `LegacyBridgeClient` (The Windows Satellite)
+Communicates with the Windows VM where FTI and Excel live.
+
+```python
+class LegacyBridgeClient:
+    def trigger_fti_test_bed(self, scenario_json: Dict) -> str:
+        # POST to Windows VM
+        # Returns a Transaction ID immediately (Async)
+        pass
+
+    def check_execution_status(self, txn_id: str) -> str:
+        # Polls Windows VM
+        pass
+```
+
+---
+
+### 4. Agent Design (Nodes in the Graph)
+
+#### Node 1: `TriageNode`
+*   **Input:** `AgentState['jira_description']`
+*   **Logic:**
+    1.  Parse Contract Code/Suffix using Regex.
+    2.  Check if `Test Type` is defined.
+    3.  **LLM Call:** "Is this request unambiguous? Return JSON {ambiguous: bool, missing_fields: []}"
+*   **Output:** Update `AgentState`.
+
+#### Node 2: `ValidatorNode`
+*   **Logic:**
+    1.  Call `MusDocIngestor` -> Get `bpd_data`.
+    2.  Call `VasRepository` -> Get `vas_data`.
+    3.  **Code Logic (Not LLM):** 
+        ```python
+        diff = DeepDiff(state['bpd_data'], state['vas_data'])
+        if diff:
+            state['validation_passed'] = False
+            state['validation_errors'] = str(diff)
+        ```
+*   **Why Code?** Don't let an LLM decide if $20 equals $20. Use Python for math.
+
+#### Node 3: `ProvisioningNode` (The Builder)
+*   **Logic:**
+    1.  **LLM Call:** Takes `bpd_data` and transforms it into FTI Scenario JSON format.
+    2.  Call `LegacyBridgeClient.trigger_fti_test_bed()`.
+    3.  Update `state['test_execution_status'] = 'RUNNING'`.
+
+---
+
+### 5. The Orchestration Logic (State Graph)
+
+This is the LangGraph definitions in Python.
+
+```python
+from langgraph.graph import StateGraph, END
+
+workflow = StateGraph(AgentState)
+
+# Define Nodes
+workflow.add_node("triage", triage_agent_node)
+workflow.add_node("validation", validator_agent_node)
+workflow.add_node("provisioning", provisioning_agent_node)
+workflow.add_node("wait_for_execution", wait_node) # The Async Pause
+workflow.add_node("finalize", reporter_agent_node)
+
+# Define Edges (The Logic)
+workflow.set_entry_point("triage")
+
+# Conditional Edge from Triage
+def check_ambiguity(state):
+    if state['is_ambiguous']:
+        return "finalize" # Go to JIRA comment
+    return "validation"
+
+workflow.add_conditional_edges("triage", check_ambiguity)
+
+# Conditional Edge from Validation
+def check_validation(state):
+    if not state['validation_passed']:
+        return "finalize" # Fail fast
+    return "provisioning"
+
+workflow.add_conditional_edges("validation", check_validation)
+
+workflow.add_edge("provisioning", "wait_for_execution")
+workflow.add_edge("wait_for_execution", "finalize")
+
+app = workflow.compile(checkpointer=postgres_checkpointer)
+```
+
+---
+
+### 6. The Async/Interrupt Strategy (Solving Challenge C)
+
+This is the trickiest part of the LLD.
+
+1.  **The Suspend:**
+    When `ProvisioningNode` calls the Windows VM, it gets an ID.
+    The graph transitions to `wait_for_execution`.
+    This node does **NOT** loop. It simply stops the execution thread and saves the state to Postgres with `status="sleeping"`.
+
+2.  **The Resume (Webhook Pattern):**
+    When the Windows VM finishes the Excel Macro, it calls a callback URL: `POST /api/callbacks/resume/{thread_id}`.
+    
+    The Orchestrator:
+    1.  Loads state from Postgres using `thread_id`.
+    2.  Updates state with the result (Pass/Fail).
+    3.  Resumes the graph from `wait_for_execution` -> `finalize`.
+
+---
+
+### 7. Deployment Diagram
+
+```mermaid
+graph TD
+    subgraph "Linux Container (AI Core)"
+        Orchestrator[LangGraph Engine]
+        StateDB[(Postgres DB)]
+        Nodes[Agent Logic (Python)]
+        
+        Orchestrator <--> StateDB
+        Orchestrator --> Nodes
+    end
+
+    subgraph "External Systems"
+        JIRA((JIRA API))
+        VAS((DB2 Database))
+        MUS((MUS Web App))
+    end
+
+    subgraph "Windows VM (Legacy Satellite)"
+        FastAPI[FastAPI Wrapper]
+        FTI[FTI Client]
+        Excel[Excel Application]
+        
+        FastAPI --> FTI
+        FastAPI --> Excel
+    end
+
+    Nodes -->|HTTPS| JIRA
+    Nodes -->|TCP/IP| VAS
+    Nodes -->|HTTPS| MUS
+    Nodes -->|HTTPS/REST| FastAPI
+```
+
+### Summary of Key Technical Decisions:
+
+1.  **Strict Typing:** Using `TypedDict` for state ensures Agents don't lose data between steps.
+2.  **Deterministic Validation:** Using Python's `DeepDiff` library for BPD vs VAS comparison instead of asking the LLM "Do these look the same?"
+3.  **Satellite Architecture:** Isolating the Windows tools (FTI/Excel) behind a clean REST API prevents the AI container from becoming bloated or unstable.
+
+-----------------------------------------
+This is a crucial pivot in the design. Moving from a background "Fire-and-Forget" process to a **Human-in-the-Loop (HITL) Conversational Model** completely changes the interaction layer.
+
+Here is the revised Low-Level Design (LLD) incorporating **MongoDB**, the **"Claim Check" Data Pattern**, and the **Chat/Async workflow**.
+
+---
+
+### 1. Strategic Decision: The "Claim Check" Pattern
+You asked: *"Should we maintain a DB for storing tool data instead of agent state?"*
+**Answer: YES.**
+
+This is known as the **Claim Check Pattern**.
+*   **The Problem:** If you store 50 pages of BPD OCR data or 2,000 rows of DB2 data inside the `AgentState`, your Context Window bloats, costs skyrocket, and the Checkpointer gets slow.
+*   **The Solution:**
+    *   **MongoDB `execution_data` Collection:** Stores the heavy JSON blobs.
+    *   **Agent State:** Stores only the `reference_id` (the Claim Check).
+    *   **Traceability:** This gives you a permanent audit log. If a claim test fails 6 months from now, you can look up exactly what the BPD and VAS looked like at the moment of testing.
+
+---
+
+### 2. Revised Data Architecture (MongoDB)
+
+We will use **MongoDB** for *both* the Agent Persistence (Checkpoints) and the Tool Data storage.
+
+#### Collection A: `agent_checkpoints`
+Managed by LangGraph. Stores the thread state (Where am I in the graph?).
+
+#### Collection B: `eba_audit_store` (Your Data Lake)
+Managed by your Tool Services.
+
+```json
+// Document Structure in 'eba_audit_store'
+{
+  "_id": "trace_12345",
+  "jira_ticket": "EBA-999",
+  "timestamp": "2023-10-27T10:00:00Z",
+  "step_data": {
+    "bpd_extraction": { ... large JSON from PDF ... },
+    "vas_query_result": { ... large JSON from DB2 ... },
+    "comparison_diff": { ... detailed diff report ... },
+    "fti_test_bed_payload": { ... JSON sent to FTI ... }
+  }
+}
+```
+
+#### Collection C: `chat_history`
+Stores the conversation between the User and the Agent for the UI.
+
+---
+
+### 3. The "Human-in-the-Loop" Workflow Design
+
+Since the user is watching a Chat UI, the Orchestrator must handle **Interrupts**.
+
+#### The Workflow logic:
+1.  **User Action:** Moves ticket to "Processing" on Dashboard.
+2.  **UI:** Calls API `POST /start_session`.
+3.  **Agent:** Runs **Triage Node**.
+4.  **Scenario A (Ambiguous):**
+    *   Agent detects missing info.
+    *   Agent generates a question: *"The contract code X is valid, but the test type is missing. Is this a 'New Plan' or 'Renewal'?"*
+    *   **CRITICAL:** The Graph **pauses** (interrupt).
+    *   **UI:** Displays the question in the chat.
+    *   **User:** Types "It is a Renewal".
+    *   **UI:** Calls API `POST /reply`.
+    *   **Agent:** Resumes, updates state, and moves to Validation.
+
+---
+
+### 4. Revised Orchestrator LLD (LangGraph)
+
+We use LangGraph's `interrupt_before` or specific "Human Node" pattern.
+
+```python
+# schema.py
+from typing import TypedDict, Optional
+
+class AgentState(TypedDict):
+    trace_id: str         # Pointer to MongoDB 'eba_audit_store'
+    thread_id: str        # Chat Session ID
+    
+    # Conversation Control
+    last_agent_message: str
+    user_feedback: Optional[str]
+    
+    # Status Flags
+    is_ambiguous: bool
+    validation_status: str
+
+# ---------------------------------------------------------
+
+# tools.py (The Claim Check Implementation)
+def save_tool_data(trace_id, key, data):
+    mongo_coll.update_one(
+        {"_id": trace_id}, 
+        {"$set": {f"step_data.{key}": data}}, 
+        upsert=True
+    )
+
+# ---------------------------------------------------------
+
+# nodes.py
+
+def triage_node(state: AgentState):
+    # 1. Analyze JIRA input
+    # 2. If ambiguous:
+    if ambiguous:
+        return {
+            "is_ambiguous": True, 
+            "last_agent_message": "I found an ambiguity. Please specify Test Type."
+        }
+    return {"is_ambiguous": False}
+
+def validation_node(state: AgentState):
+    # 1. Run BPD & VAS Tools
+    bpd_data = mus_tool.get_data()
+    vas_data = vas_tool.get_data()
+    
+    # 2. SAVE TO DB (Claim Check)
+    save_tool_data(state['trace_id'], "bpd", bpd_data)
+    save_tool_data(state['trace_id'], "vas", vas_data)
+    
+    # 3. Compare logic
+    # ...
+    return {"validation_status": "PASSED"}
+
+# ---------------------------------------------------------
+
+# graph.py
+from langgraph.checkpoint.mongodb import MongoDBSaver
+
+# Initialize Mongo Checkpointer
+checkpointer = MongoDBSaver(mongo_client)
+
+workflow = StateGraph(AgentState)
+
+workflow.add_node("triage", triage_node)
+workflow.add_node("human_input", human_input_placeholder_node) # Dummy node for pausing
+workflow.add_node("validation", validation_node)
+# ... other nodes ...
+
+# Edge Logic
+def check_ambiguity(state):
+    if state['is_ambiguous']:
+        return "human_input" # Route to pause
+    return "validation"
+
+workflow.add_conditional_edges("triage", check_ambiguity)
+workflow.add_edge("human_input", "triage") # Loop back to re-evaluate after human input
+
+# COMPILE with Interrupt
+app = workflow.compile(
+    checkpointer=checkpointer, 
+    interrupt_before=["human_input"] # STOP execution here
+)
+```
+
+---
+
+### 5. API & UI Integration Specification
+
+This explains how your Front-End talks to the Back-End.
+
+#### Endpoint 1: Start Processing
+*   **Trigger:** User moves ticket to "Processing".
+*   **URL:** `POST /api/agent/start`
+*   **Payload:** `{"jira_id": "EBA-101", "user_id": "john_doe"}`
+*   **Backend:**
+    1.  Creates a `trace_id` in MongoDB.
+    2.  Starts the LangGraph thread.
+    3.  Runs until it hits an **Interrupt** (Human Input) or **End**.
+*   **Response:**
+    ```json
+    {
+      "thread_id": "uuid-555",
+      "status": "WAITING_FOR_USER",
+      "message": "Please specify Test Type." // Displayed in Chat
+    }
+    ```
+
+#### Endpoint 2: User Reply (Chat)
+*   **Trigger:** User types "It is a Renewal" and hits enter.
+*   **URL:** `POST /api/agent/reply`
+*   **Payload:** `{"thread_id": "uuid-555", "user_response": "It is a Renewal"}`
+*   **Backend:**
+    1.  Updates the State: `state["user_feedback"] = "It is a Renewal"`.
+    2.  **Resumes** the graph execution (`app.stream(..., config=thread_id)`).
+*   **Response:**
+    ```json
+    {
+      "status": "PROCESSING",
+      "message": "Understood. Proceeding to Validation..."
+    }
+    ```
+
+#### Endpoint 3: Poll Status (for Async Tools)
+*   **Trigger:** FE Polling every 5s.
+*   **URL:** `GET /api/agent/status/{thread_id}`
+*   **Response:**
+    ```json
+    {
+      "current_step": "validation_node",
+      "logs": ["Fetching BPD...", "Querying DB2...", "Comparison successful."]
+    }
+    ```
+
+### 6. Why this fits your "Deep Think" requirement
+
+1.  **Decoupling Data from Control:** By storing the heavy tool data in `eba_audit_store` (MongoDB) and only keeping the pointers in the Agent State, you create a system that is **auditable** (critical for EBA) and **performant** (lightweight graph state).
+2.  **Native Async:** The "Interrupt" pattern in LangGraph perfectly matches your Chat UI requirement. The Agent isn't "blocked" waiting; it is completely suspended (persisted to Mongo) until the API call wakes it up.
+3.  **Observability:** Because you are saving tool outputs to a DB, you can build a separate **"Debug Dashboard"**. If a test fails, a developer can open the Debug Dashboard, enter the JIRA ID, and see side-by-side: "Here is what the PDF Parser saw" vs "Here is what DB2 returned."
+
+This architecture is production-grade, scalable, and specifically tailored to the complexities of Enterprise Benefit Administration.
+
+------------------------------------------
+
+You are spot on.
+
+Using `interrupt_before` (serializing the entire program memory stack) introduces "Magic" into the system. If you redeploy the code while a thread is paused, the old serialized state might not match the new code, causing deserialization errors.
+
+**Your proposed approach is the "Re-entrant State Machine" pattern.** This is arguably **more robust** for enterprise systems.
+
+Here is the revised LLD using **Re-entrant Logic** and **Server-Sent Events (SSE)** for the real-time experience.
+
+---
+
+### 1. The "Re-entrant" Design Pattern (Idempotency)
+
+Instead of "resuming" a frozen Python thread, we simply **re-run the workflow from the start** every time the user replies.
+
+**The Trick:** The workflow checks the MongoDB "Claim Check" store at every step.
+*   *Logic:* `If Step 1 data exists in DB -> Skip Step 1 -> Move to Step 2.`
+*   *Logic:* `If Step 2 data missing -> Execute Step 2.`
+
+This makes your code **Idempotent**. You can crash the server, restart it, and the agent just "fast-forwards" to where it left off because the data is in Mongo.
+
+### 2. The Communication Protocol: Server-Sent Events (SSE)
+
+Since we want a "Chat Interface" feel, SSE is superior to polling. It keeps a persistent one-way connection open while the Agent is thinking/working.
+
+**Event Types we will stream:**
+1.  `event: log` → Updates the UI "Processing Steps" list (e.g., "Querying VAS...").
+2.  `event: message` → The actual chat response to the user.
+3.  `event: stop` → Tells the UI to enable the text input box (expecting user input).
+4.  `event: finish` → Task completed.
+
+---
+
+### 3. Revised Component Design
+
+#### A. The Controller (FastAPI with Generator)
+
+The API endpoint isn't a standard function; it's an **Async Generator**.
+
+```python
+# api.py
+from fastapi import FastAPI, Request
+from sse_starlette.sse import EventSourceResponse
+
+app = FastAPI()
+
+@app.post("/api/agent/interact")
+async def interact(request: Request):
+    payload = await request.json()
+    thread_id = payload.get("thread_id")
+    user_input = payload.get("message") # Empty if first run
+
+    # We return an SSE stream immediately
+    return EventSourceResponse(
+        run_orchestrator_stream(thread_id, user_input)
+    )
+```
+
+#### B. The Orchestrator (The Re-entrant Runner)
+
+This function acts as the "Supervisor." It checks the DB and decides which Agent to call.
+
+```python
+# orchestrator.py
+
+async def run_orchestrator_stream(thread_id, user_input):
+    # 1. Load Trace Data from Mongo
+    audit_record = db.eba_audit_store.find_one({"_id": thread_id}) or {}
+    
+    # --- STEP 1: TRIAGE & AMBIGUITY ---
+    if not audit_record.get("step_triage_complete"):
+        yield {"event": "log", "data": "Analyzing JIRA ticket..."}
+        
+        # Call Triage Tool/Agent
+        result = await triage_agent.analyze(audit_record['jira_id'])
+        
+        if result['is_ambiguous']:
+            # Check if we just got the answer from the user
+            if user_input:
+                # Process input, save to DB, and mark step complete
+                db.eba_audit_store.update_one(..., {"$set": {
+                    "step_triage_complete": True,
+                    "triage_data": result, 
+                    "clarification": user_input
+                }})
+                yield {"event": "log", "data": "Clarification received."}
+            else:
+                # Ask the User
+                yield {"event": "message", "data": result['question']}
+                yield {"event": "stop", "data": "waiting_input"}
+                return # EXIT STREAM. We wait for next API call.
+        else:
+            # Mark complete automatically
+             db.eba_audit_store.update_one(..., {"$set": {"step_triage_complete": True}})
+
+    # --- STEP 2: VALIDATION ---
+    # The code flows here immediately if Step 1 was already marked True in DB
+    if not audit_record.get("step_validation_complete"):
+        yield {"event": "log", "data": "Reading BPD PDF..."}
+        # ... Run BPD Tool ...
+        
+        yield {"event": "log", "data": "Querying DB2 (VAS)..."}
+        # ... Run VAS Tool ...
+        
+        # Save Data (Claim Check)
+        db.eba_audit_store.update_one(..., {"$set": {"step_validation_complete": True}})
+        yield {"event": "message", "data": "Validation Passed. Starting FTI..."}
+
+    # --- STEP 3: ASYNC HANDOFF ---
+    if not audit_record.get("fti_triggered"):
+         # Trigger FTI
+         yield {"event": "log", "data": "Triggering FTI Test Bed..."}
+         yield {"event": "finish", "data": "Tests Running in background."}
+```
+
+---
+
+### 4. Handling the "Async Gap" (The FTI Wait)
+
+Since FTI takes time, you cannot keep the SSE stream open for 30 minutes.
+
+**The Strategy:**
+1.  The SSE stream closes when FTI is triggered (End of Step 3 above).
+2.  **The Webhook:** When FTI finishes, it hits a webhook.
+3.  **The Notification:** The Webhook updates MongoDB status to `{"fti_status": "COMPLETED"}`.
+4.  **The UI Update:**
+    *   *Option A:* The UI polls MongoDB every 30s to check status.
+    *   *Option B:* Use WebSockets for notification (Overkill?).
+    *   *Recommendation:* Stick to **UI Polling** just for the "Waiting for FTI" phase. It's simple.
+5.  **The Resume:** Once FTI is done, the user (or auto-refresh) triggers the API again. The Orchestrator sees `fti_status: COMPLETED` and proceeds to Step 7 (Results analysis).
+
+---
+
+### 5. Data Traceability & Debugging
+
+With this "Re-entrant + Mongo" design, your debugging becomes incredibly powerful.
+
+If a user says "The agent is stuck," you open MongoDB Compass:
+
+**Document: `trace_eba_101`**
+```json
+{
+  "step_triage_complete": true,
+  "user_clarification": "It is a Renewal",
+  "step_validation_complete": false, 
+  "last_error": "DB2 Connection Timeout"
+}
+```
+You know *exactly* where it stopped. You can fix the DB2 connection, and tell the user "Try clicking reply again." The code will see Triage is done, skip it, and retry Validation immediately.
+
+### 6. Pros/Cons of this Revised LLD
+
+**Pros:**
+*   **Zero "Black Box" State:** No serialized Python objects. State is pure, readable JSON in Mongo.
+*   **Hot-Fix Friendly:** You can change the code logic for Step 2, and existing tickets currently at Step 2 will pick up the new logic on the next interaction.
+*   **Better UX:** SSE gives that "ChatGPT-like" typing effect and real-time progress logs.
+
+**Cons:**
+*   **Boilerplate:** You have to write the `if not step_complete:` checks manually for each stage (though a Decorator pattern can clean this up).
+
+### Final Recommendation
+
+This approach (SSE + Re-entrant FSM + MongoDB) is the most resilient architecture for your specific constraints. It handles the "Deep Thinking" chat loops and the "Long Running" legacy tool waits seamlessly.
