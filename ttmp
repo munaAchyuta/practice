@@ -444,3 +444,25 @@ Your **schema JSON alone is adding ~3–4 seconds latency**.
 ---
 
 If you'd like, I can also show you a **very advanced technique used in production AI systems called "Schema Attention Routing"** that reduces **500-column schemas to ~15 columns automatically**, often **cutting latency by 70% while increasing accuracy**.
+
+import networkx as nx
+# Build directed graph once
+G = nx.DiGraph()
+for rel in relationships:
+    from_t, to_t = rel["from"].split(".")[0], rel["to"].split(".")[0]
+    G.add_edge(from_t, to_t, fk=rel["from"], pk=rel["to"])  # directed child → parent
+
+def smart_traversal(G, seeds, max_hops=3, max_tables=12):
+    visited = set()
+    queue = [(s, 0) for s in seeds]  # (table, distance)
+    while queue:
+        node, dist = queue.pop(0)
+        if node in visited or dist > max_hops: continue
+        visited.add(node)
+        # Expand BOTH directions (successors + predecessors)
+        for neigh in list(G.successors(node)) + list(G.predecessors(node)):
+            if neigh not in visited:
+                queue.append((neigh, dist+1))
+        # Early stop on hubs
+        if len(visited) > max_tables: break
+    return list(visited)[:max_tables]
